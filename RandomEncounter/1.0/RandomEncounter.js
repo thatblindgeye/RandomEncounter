@@ -2,7 +2,7 @@
  * RandomEncounter
  *
  * Version 1.0
- * Last updated: May 30, 2023
+ * Last updated: June 10, 2023
  * Author: thatblindgeye
  * GitHub: https://github.com/thatblindgeye
  */
@@ -11,9 +11,9 @@ const RandomEncounter = (function () {
   'use strict';
 
   const VERSION = '1.0';
-  const LAST_UPDATED = 1685487612396;
+  const LAST_UPDATED = 1686511846334;
   const RANDOMENCOUNTER_BASE_NAME = 'RandomEncounter';
-  const RANDOMENCOUNTER_DISPLAY_NAME = `${DURATION_BASE_NAME} v${VERSION}`;
+  const RANDOMENCOUNTER_DISPLAY_NAME = `${RANDOMENCOUNTER_BASE_NAME} v${VERSION}`;
   const COMMANDS = {
     ADD_ENCOUNTER: 'add',
     DELETE_ENCOUNTER: 'delete',
@@ -22,7 +22,14 @@ const RandomEncounter = (function () {
     ROLL_ENCOUNTER: 'roll',
   };
 
-  const PREFIX = '!encounter ';
+  const REGEX = {
+    ADD_ENCOUNTERS_FORMAT: /\[".+?"\](=\d*)?/,
+    ADD_ENCOUNTER_SINGLE: /".+?"/g,
+    ADD_ENCOUNTER_USES: /(?<=\=)\d*$/,
+    ADD_CATEGORY: /(?<!\[).+?(?=\[)(?!\])/,
+  };
+
+  const PREFIX = '!encounter';
   const MACROS = {
     ADD_ENCOUNTER_MACRO: {
       name: 'RandomEncounter-add',
@@ -52,7 +59,7 @@ const RandomEncounter = (function () {
         {
           description:
             'A random encounter was rolled with [[2d4 + 4]] creatures!',
-          remainingUses: undefined,
+          uses: undefined,
           id: 0,
         },
       ],
@@ -101,12 +108,18 @@ const RandomEncounter = (function () {
       DISPLAY_ENCOUNTERS,
       ROLL_ENCOUNTER,
     } = COMMANDS;
-    const { ENCOUNTER_ROLLTYPE, ENCOUNTER_RANGE } = CONFIG_SETTINGS;
 
-    const [prefix, ...options] = message.content.split('|');
-    const command = _.map(prefix.split(' '), (prefixItem) =>
-      prefixItem.toLowerCase()
-    )[1];
+    const commandContent = message.content.replace(/!encounter\s*/);
+    const [command, ...commandArgs] = _.map(
+      commandContent.split('|'),
+      (content, index) => {
+        if (index === 0) {
+          return content.toLowerCase();
+        }
+
+        return content;
+      }
+    );
 
     if (command && !_.contains(COMMANDS, command)) {
       throw new Error(
@@ -114,7 +127,7 @@ const RandomEncounter = (function () {
       );
     }
 
-    return [command, ...options];
+    return [command, ...commandArgs];
   }
 
   const helpRowTemplate = _.template(
@@ -161,19 +174,122 @@ const RandomEncounter = (function () {
     return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${setEncounterCells}${displayEncounterCells}${rollEncounterCells}</tbody></table>`;
   }
 
+  function splitAddEncounterArgs(commandArgs) {
+    const { ADD_ENCOUNTERS_FORMAT, ADD_CATEGORY } = REGEX;
+    const argsObj = {};
+    const categoryNameIndex = commandArgs[0].search(ADD_CATEGORY);
+    const firstEncountersIndex =
+      commandArgs.length > 1
+        ? commandArgs[1].search(ADD_ENCOUNTERS_FORMAT)
+        : -1;
+
+    if (categoryNameIndex === -1) {
+      throw new Error(
+        `You must pass in a category name before the list of encounters when using the <code>${COMMANDS.ADD_ENCOUNTER}</code> command.`
+      );
+    }
+
+    if (categoryNameIndex > -1) {
+      argsObj.category = commandArgs[0]
+        .slice(categoryNameIndex, firstEncountersIndex - 1)
+        .trim();
+    }
+
+    if (commandArgs[1] && firstEncountersIndex === -1) {
+      throw new Error(
+        `When passing in a list of encounters to add, you must use the format <code>[<comma separated list of encounters wrapped in quotes>]<=optional uses></code>, e.g. <code>["An encounter description", "Another encounter description"]=2</code>.`
+      );
+    }
+
+    return {
+      category: commandArgs[0]
+        .slice(categoryNameIndex, firstEncountersIndex - 1)
+        .trim(),
+      encounterString: commandArgs.slice(firstEncountersIndex).trim(),
+    };
+  }
+
   function splitEncounterString(encounterString) {
-    const encounterArrays = encounterString.match(/\[".+?"\](=\d*)?/g);
+    const { ADD_ENCOUNTERS_FORMAT, ADD_ENCOUNTER_SINGLE, ADD_ENCOUNTER_USES } =
+      REGEX;
+    const encounterArrays = encounterString.match(
+      new RegExp(ADD_ENCOUNTERS_FORMAT, 'g')
+    );
+
+    if (!encounterArrays) {
+      throw new Error(
+        'The format of the passed in encounter(s) was incorrect. When passing in a list of encounters to add, you must use the format <code>[<comma separated list of encounters wrapped in quotes>]<=optional uses></code> for each set of encounters, e.g. <code>["An encounter description", "Another encounter description"]=2 ["Encounter in a different set"]</code>.'
+      );
+    }
 
     return encounterArrays.map((encounterArray) => {
-      const descriptions = _.map(encounterArray.match(/".+?"/g), (desc) =>
-        desc.replace(/"/g, '')
+      const descriptions = _.map(
+        encounterArray.match(ADD_ENCOUNTER_SINGLE),
+        (desc) => desc.replace(/"/g, '')
       );
-      const usesIndex = encounterArray.search(/(?<=\=)\d*$/);
+      const usesIndex = encounterArray.search(ADD_ENCOUNTER_USES);
 
-      return { descriptions, uses: encounterArray.slice(usesIndex) };
+      return {
+        descriptions,
+        uses:
+          usesIndex !== -1
+            ? parseInt(encounterArray.slice(usesIndex))
+            : undefined,
+      };
     });
   }
-  function addEncounter(encounterString) {}
+
+  let now = Date.now();
+  function createUniqueId(arrayToCheck) {
+    let id = (now++).toString(36);
+    let isIdTaken = _.find(arrayToCheck, (encounter) => encounter.id === id);
+
+    while (isIdTaken) {
+      id = (now++).toString(36);
+      isIdTaken = _.find(stateEncounters, (encounter) => encounter.id === id);
+    }
+
+    return id;
+  }
+
+  function createEncounterObject(description, uses, id) {
+    return {
+      description,
+      uses,
+      id,
+    };
+  }
+
+  function convertEncountersArrayItems(encountersArray) {
+    const stateEncounters = Object.values(
+      state[RANDOMENCOUNTER_BASE_NAME].encounters
+    ).flat();
+    const encountersObjects = _.map(encountersArray, (encounter) => {
+      const { descriptions, uses } = encounter;
+
+      return _.map(descriptions, (description) =>
+        createEncounterObject(
+          description,
+          uses,
+          createUniqueId(stateEncounters)
+        )
+      );
+    });
+
+    return encountersObjects.flat();
+  }
+
+  function addEncounter(category, encounterString) {
+    if (!_.has(state[RANDOMENCOUNTER_BASE_NAME].encounters, category)) {
+      throw new Error(
+        `The encounter category <code>${category}</code> does not exist. Check that the category is correct or add a new category before attempting to add encounters to it.`
+      );
+    }
+
+    const categoryCopy = state[RANDOMENCOUNTER_BASE_NAME].encounters[category];
+    const encountersArray = splitEncounterString(encounterString);
+    const encountersObjects = convertEncountersArrayItems(encountersArray);
+  }
 
   function handleChatInput(message) {
     try {
@@ -185,7 +301,7 @@ const RandomEncounter = (function () {
         ROLL_ENCOUNTER,
       } = COMMANDS;
 
-      const [command, ...options] = validateCommand(message);
+      const [command, ...commandArgs] = validateCommand(message);
 
       switch (command) {
         case ADD_ENCOUNTER:
