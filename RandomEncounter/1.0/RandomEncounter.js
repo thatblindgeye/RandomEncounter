@@ -174,41 +174,6 @@ const RandomEncounter = (function () {
     return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${setEncounterCells}${displayEncounterCells}${rollEncounterCells}</tbody></table>`;
   }
 
-  function splitAddEncounterArgs(commandArgs) {
-    const { ADD_ENCOUNTERS_FORMAT, ADD_CATEGORY } = REGEX;
-    const argsObj = {};
-    const categoryNameIndex = commandArgs[0].search(ADD_CATEGORY);
-    const firstEncountersIndex =
-      commandArgs.length > 1
-        ? commandArgs[1].search(ADD_ENCOUNTERS_FORMAT)
-        : -1;
-
-    if (categoryNameIndex === -1) {
-      throw new Error(
-        `You must pass in a category name before the list of encounters when using the <code>${COMMANDS.ADD_ENCOUNTER}</code> command.`
-      );
-    }
-
-    if (categoryNameIndex > -1) {
-      argsObj.category = commandArgs[0]
-        .slice(categoryNameIndex, firstEncountersIndex - 1)
-        .trim();
-    }
-
-    if (commandArgs[1] && firstEncountersIndex === -1) {
-      throw new Error(
-        `When passing in a list of encounters to add, you must use the format <code>[<comma separated list of encounters wrapped in quotes>]<=optional uses></code>, e.g. <code>["An encounter description", "Another encounter description"]=2</code>.`
-      );
-    }
-
-    return {
-      category: commandArgs[0]
-        .slice(categoryNameIndex, firstEncountersIndex - 1)
-        .trim(),
-      encounterString: commandArgs.slice(firstEncountersIndex).trim(),
-    };
-  }
-
   function splitEncounterString(encounterString) {
     const { ADD_ENCOUNTERS_FORMAT, ADD_ENCOUNTER_SINGLE, ADD_ENCOUNTER_USES } =
       REGEX;
