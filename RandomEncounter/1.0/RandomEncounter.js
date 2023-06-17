@@ -1,3 +1,4 @@
+delete state.RandomEncounter;
 /**
  * RandomEncounter
  *
@@ -22,11 +23,11 @@ const RandomEncounter = (function () {
     ROLL_ENCOUNTER: 'roll',
   };
 
-  const REGEX = {
-    ADD_ENCOUNTERS_FORMAT: /\[".+?"\](=\d*)?/,
-    ADD_ENCOUNTER_SINGLE: /".+?"/g,
-    ADD_ENCOUNTER_USES: /(?<=\=)\d*$/,
-    ADD_CATEGORY: /(?<!\[).+?(?=\[)(?!\])/,
+  const STATUS_STYLING = {
+    error: 'rgba(255, 0, 0, 1); background-color: rgba(255, 0, 0, 0.25);',
+    warning: 'rgba(255, 127, 0, 1); background-color: rgba(255, 127, 0, 0.25);',
+    success: 'rgba(0, 90, 0, 1); background-color: rgba(0, 150, 0, 0.15);',
+    generic: 'gray;',
   };
 
   const PREFIX = '!encounter';
@@ -96,11 +97,61 @@ const RandomEncounter = (function () {
     });
   }
 
-  function sendMessage(message, noarchive = true) {
-    sendChat(RANDOMENCOUNTER_DISPLAY_NAME, message, null, { noarchive });
+  function sendMessage(message, toPlayer, status, noarchive = true) {
+    const messagePrefix = toPlayer ? `/w ${toPlayer} ` : '';
+    const statusStyling = status ? STATUS_STYLING[status.toLowerCase()] : '';
+    const messageStyling = statusStyling
+      ? `padding: 8px; border: 1px solid ${statusStyling}`
+      : '';
+    const messageBlock = `${messagePrefix}<div${
+      messageStyling ? ` style="${messageStyling}"` : ''
+    }>${message}</div>`;
+
+    sendChat(RANDOMENCOUNTER_DISPLAY_NAME, messageBlock, null, { noarchive });
   }
 
-  function validateCommand(message) {
+  function validateAddEncounterCommand(commandArgs) {
+    const hasInvalidCategoryArg = !commandArgs[0];
+    if (hasInvalidCategoryArg) {
+      throw new Error(
+        `Invalid category name. Category names must be at least 1 character long and cannot be blank.`
+      );
+    }
+
+    const [categoryName, ...encounterArgs] = _.filter(
+      commandArgs,
+      (arg) => arg !== ''
+    );
+
+    const invalidEncounterArgs =
+      commandArgs.length > 1 && !encounterArgs.length;
+    if (invalidEncounterArgs) {
+      throw new Error(
+        `No valid encounters to add. Each encounter must be at least 1 character long and cannot be blank.`
+      );
+    }
+
+    const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
+    const existingCategory =
+      _.has(stateEncounters, categoryName) && !encounterArgs.length;
+    if (existingCategory) {
+      throw new Error(
+        `Category <code>${commandArgs[0]}</code> already exists. Category names must be unique when adding a new category.`
+      );
+    }
+
+    const nonexistantCategory =
+      !_.has(stateEncounters, categoryName) && encounterArgs.length;
+    if (nonexistantCategory) {
+      throw new Error(
+        `The encounter category <code>${commandArgs[0]}</code> does not exist. Check that the category is correct, including lettercase and spacing, or add a new category before attempting to add encounters to it.`
+      );
+    }
+
+    return [categoryName, ...encounterArgs];
+  }
+
+  function validateCommands(message) {
     const {
       ADD_ENCOUNTER,
       DELETE_ENCOUNTER,
@@ -109,25 +160,40 @@ const RandomEncounter = (function () {
       ROLL_ENCOUNTER,
     } = COMMANDS;
 
-    const commandContent = message.content.replace(/!encounter\s*/);
+    const commandContent = message.content.replace(/!encounter\s*/, '');
     const [command, ...commandArgs] = _.map(
       commandContent.split('|'),
       (content, index) => {
-        if (index === 0) {
-          return content.toLowerCase();
-        }
-
-        return content;
+        return index === 0 ? content.toLowerCase().trim() : content.trim();
       }
     );
 
-    if (command && !_.contains(COMMANDS, command)) {
+    const invalidCommand = command && !_.contains(COMMANDS, command);
+    if (invalidCommand) {
       throw new Error(
         `<code>${command}</code> is not a valid command. Send <code>!encounter</code> in chat for a list of valid commands.`
       );
     }
 
-    return [command, ...commandArgs];
+    const commandCalledWithoutParameters =
+      [ADD_ENCOUNTER, DELETE_ENCOUNTER, SET_ENCOUNTER].includes(command) &&
+      !commandArgs.length;
+    if (commandCalledWithoutParameters) {
+      throw new Error(
+        `At least 1 parameter must be passed in when calling the <code>${command}</code> command. Send <code>!encounter</code> in chat to check the expected syntax of each command.`
+      );
+    }
+
+    if (!command) {
+      return command;
+    }
+
+    let validatedArgs;
+    if (command === ADD_ENCOUNTER) {
+      validatedArgs = validateAddEncounterCommand(commandArgs);
+    }
+
+    return [command, ...validatedArgs];
   }
 
   const helpRowTemplate = _.template(
@@ -148,7 +214,7 @@ const RandomEncounter = (function () {
 
     const addEncounterCells = helpRowTemplate({
       commandCell: `<a href="!encounter ${ADD_ENCOUNTER}|">Add Encounter</a>`,
-      descriptionCell: `<div><code>!encounter ${ADD_ENCOUNTER}|</code></div><br/><div>></div>`,
+      descriptionCell: `<div><code>!encounter ${ADD_ENCOUNTER}|</code></div><br/><div></div>`,
     });
 
     const deleteEncounterCells = helpRowTemplate({
@@ -174,50 +240,30 @@ const RandomEncounter = (function () {
     return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${setEncounterCells}${displayEncounterCells}${rollEncounterCells}</tbody></table>`;
   }
 
-  function splitEncounterString(encounterString) {
-    const { ADD_ENCOUNTERS_FORMAT, ADD_ENCOUNTER_SINGLE, ADD_ENCOUNTER_USES } =
-      REGEX;
-    const encounterArrays = encounterString.match(
-      new RegExp(ADD_ENCOUNTERS_FORMAT, 'g')
-    );
-
-    if (!encounterArrays) {
-      throw new Error(
-        'The format of the passed in encounter(s) was incorrect. When passing in a list of encounters to add, you must use the format <code>[<comma separated list of encounters wrapped in quotes>]<=optional uses></code> for each set of encounters, e.g. <code>["An encounter description", "Another encounter description"]=2 ["Encounter in a different set"]</code>.'
-      );
-    }
-
-    return encounterArrays.map((encounterArray) => {
-      const descriptions = _.map(
-        encounterArray.match(ADD_ENCOUNTER_SINGLE),
-        (desc) => desc.replace(/"/g, '')
-      );
-      const usesIndex = encounterArray.search(ADD_ENCOUNTER_USES);
-
-      return {
-        descriptions,
-        uses:
-          usesIndex !== -1
-            ? parseInt(encounterArray.slice(usesIndex))
-            : undefined,
-      };
-    });
-  }
-
   let now = Date.now();
   function createUniqueId(arrayToCheck) {
+    now = Date.now();
     let id = (now++).toString(36);
     let isIdTaken = _.find(arrayToCheck, (encounter) => encounter.id === id);
 
     while (isIdTaken) {
       id = (now++).toString(36);
-      isIdTaken = _.find(stateEncounters, (encounter) => encounter.id === id);
+      isIdTaken = _.find(arrayToCheck, (encounter) => encounter.id === id);
     }
 
     return id;
   }
 
-  function createEncounterObject(description, uses, id) {
+  function addCategory(categoryName) {
+    state[RANDOMENCOUNTER_BASE_NAME].encounters[categoryName] = [];
+    sendMessage(
+      `<code>${categoryName}</code> category created.`,
+      'gm',
+      'success'
+    );
+  }
+
+  function encountersObjectFactory(description, uses, id) {
     return {
       description,
       uses,
@@ -225,35 +271,47 @@ const RandomEncounter = (function () {
     };
   }
 
-  function convertEncountersArrayItems(encountersArray) {
+  function createEncounterObjects(encountersArray) {
     const stateEncounters = Object.values(
       state[RANDOMENCOUNTER_BASE_NAME].encounters
     ).flat();
-    const encountersObjects = _.map(encountersArray, (encounter) => {
-      const { descriptions, uses } = encounter;
+    const lastEncounterItem = encountersArray[encountersArray.length - 1];
+    const uses = /^\s*\d+\s*$/.test(lastEncounterItem)
+      ? parseInt(lastEncounterItem)
+      : undefined;
+    const arrayToConvert =
+      uses !== undefined
+        ? encountersArray.slice(0, encountersArray.length - 1)
+        : encountersArray;
 
-      return _.map(descriptions, (description) =>
-        createEncounterObject(
-          description,
-          uses,
-          createUniqueId(stateEncounters)
-        )
-      );
-    });
+    const encountersObjects = _.map(arrayToConvert, (encounter) =>
+      encountersObjectFactory(encounter, uses, createUniqueId(stateEncounters))
+    );
 
-    return encountersObjects.flat();
+    return encountersObjects;
   }
 
-  function addEncounter(category, encounterString) {
-    if (!_.has(state[RANDOMENCOUNTER_BASE_NAME].encounters, category)) {
-      throw new Error(
-        `The encounter category <code>${category}</code> does not exist. Check that the category is correct or add a new category before attempting to add encounters to it.`
-      );
-    }
+  function addEncounter(categoryName, encountersToAdd) {
+    const categoryCopy =
+      state[RANDOMENCOUNTER_BASE_NAME].encounters[categoryName];
+    const encounterObjects = createEncounterObjects(encountersToAdd);
+    const initialUses = encounterObjects[0].uses;
 
-    const categoryCopy = state[RANDOMENCOUNTER_BASE_NAME].encounters[category];
-    const encountersArray = splitEncounterString(encounterString);
-    const encountersObjects = convertEncountersArrayItems(encountersArray);
+    state[RANDOMENCOUNTER_BASE_NAME].encounters[categoryName] = [
+      ...categoryCopy,
+      ...encounterObjects,
+    ];
+
+    sendMessage(
+      `<div>The following encounters were added to the <code>${categoryName}</code> category with ${
+        initialUses !== undefined ? `${initialUses} uses` : 'no initial uses'
+      }:<div><ul>${_.map(
+        encounterObjects,
+        (encounter) => `<li>${encounter.description}</li>`
+      )}</ul></div></div>`,
+      'gm',
+      'success'
+    );
   }
 
   function handleChatInput(message) {
@@ -266,10 +324,18 @@ const RandomEncounter = (function () {
         ROLL_ENCOUNTER,
       } = COMMANDS;
 
-      const [command, ...commandArgs] = validateCommand(message);
+      const [command, ...commandArgs] = validateCommands(message);
 
       switch (command) {
         case ADD_ENCOUNTER:
+          const [categoryName, ...encounters] = commandArgs;
+
+          if (encounters.length) {
+            addEncounter(categoryName, encounters);
+          } else {
+            addCategory(categoryName);
+          }
+
           break;
         case DELETE_ENCOUNTER:
           break;
@@ -280,11 +346,11 @@ const RandomEncounter = (function () {
         case ROLL_ENCOUNTER:
           break;
         default:
-          buildHelpDisplay();
+          sendMessage(buildHelpDisplay(), 'gm');
           break;
       }
     } catch (error) {
-      sendMessage(`/w gm ${error.message}`);
+      sendMessage(`${error.message}`, 'gm', 'error');
     }
   }
 
@@ -292,6 +358,8 @@ const RandomEncounter = (function () {
     on('chat:message', (message) => {
       if (message.type === 'api' && /^!encounter/i.test(message.content)) {
         handleChatInput(message);
+        // DELETE
+        log(state[RANDOMENCOUNTER_BASE_NAME]);
       }
     });
   }
