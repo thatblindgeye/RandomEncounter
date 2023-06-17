@@ -12,13 +12,13 @@ const RandomEncounter = (function () {
   'use strict';
 
   const VERSION = '1.0';
-  const LAST_UPDATED = 1686511846334;
+  const LAST_UPDATED = 1687013941553;
   const RANDOMENCOUNTER_BASE_NAME = 'RandomEncounter';
   const RANDOMENCOUNTER_DISPLAY_NAME = `${RANDOMENCOUNTER_BASE_NAME} v${VERSION}`;
   const COMMANDS = {
     ADD_ENCOUNTER: 'add',
     DELETE_ENCOUNTER: 'delete',
-    SET_ENCOUNTER: 'set',
+    UPDATE_ENCOUNTER: 'update',
     DISPLAY_ENCOUNTERS: 'display',
     ROLL_ENCOUNTER: 'roll',
   };
@@ -40,9 +40,9 @@ const RandomEncounter = (function () {
       name: 'RandomEncounter-delete',
       action: `${PREFIX} ${COMMANDS.DELETE_ENCOUNTER} ?{Encounter ID to delete}`,
     },
-    SET_ENCOUNTER_MACRO: {
+    UPDATE_ENCOUNTER_MACRO: {
       name: 'RandomEncounter-set',
-      action: `${PREFIX} ${COMMANDS.SET_ENCOUNTER}`,
+      action: `${PREFIX} ${COMMANDS.UPDATE_ENCOUNTER}`,
     },
     DISPLAY_ENCOUNTERS_MACRO: {
       name: 'RandomEncounter-display',
@@ -61,7 +61,7 @@ const RandomEncounter = (function () {
           description:
             'A random encounter was rolled with [[2d4 + 4]] creatures!',
           uses: undefined,
-          id: 0,
+          id: '00000000',
         },
       ],
     },
@@ -148,14 +148,55 @@ const RandomEncounter = (function () {
       );
     }
 
-    return [categoryName, ...encounterArgs];
+    return { category: categoryName, encounters: encounterArgs };
+  }
+
+  function validateDeleteEncounterCommand(commandArgs) {
+    const argsWithoutEmptyStrings = _.filter(commandArgs, (arg) => arg !== '');
+    if (!argsWithoutEmptyStrings.length) {
+      throw new Error(
+        'No valid items to delete. An item cannot be blank and must be either a category name to delete an entire category, or a unique ID of an encounter.'
+      );
+    }
+
+    const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
+    const encounterIDs = _.pluck(Object.values(stateEncounters).flat(), 'id');
+    const nonexistantItems = _.filter(
+      argsWithoutEmptyStrings,
+      (arg) => !_.has(stateEncounters, arg) && !_.contains(encounterIDs, arg)
+    );
+
+    if (nonexistantItems.length === argsWithoutEmptyStrings.length) {
+      throw new Error(
+        'No existing items to delete. Check that the items to delete are correct and already exist.'
+      );
+    }
+
+    const itemsToDelete = _.difference(
+      argsWithoutEmptyStrings,
+      nonexistantItems
+    );
+    const encountersToDelete = [];
+    const categoriesToDelete = _.filter(itemsToDelete, (itemToDelete) => {
+      const isCategory = _.contains(Object.keys(stateEncounters), itemToDelete);
+      if (!isCategory) {
+        encountersToDelete.push(itemToDelete);
+      }
+      return isCategory;
+    });
+
+    return {
+      categoriesToDelete,
+      encountersToDelete,
+      nonexistantItems,
+    };
   }
 
   function validateCommands(message) {
     const {
       ADD_ENCOUNTER,
       DELETE_ENCOUNTER,
-      SET_ENCOUNTER,
+      UPDATE_ENCOUNTER,
       DISPLAY_ENCOUNTERS,
       ROLL_ENCOUNTER,
     } = COMMANDS;
@@ -176,7 +217,7 @@ const RandomEncounter = (function () {
     }
 
     const commandCalledWithoutParameters =
-      [ADD_ENCOUNTER, DELETE_ENCOUNTER, SET_ENCOUNTER].includes(command) &&
+      [ADD_ENCOUNTER, DELETE_ENCOUNTER, UPDATE_ENCOUNTER].includes(command) &&
       !commandArgs.length;
     if (commandCalledWithoutParameters) {
       throw new Error(
@@ -192,8 +233,11 @@ const RandomEncounter = (function () {
     if (command === ADD_ENCOUNTER) {
       validatedArgs = validateAddEncounterCommand(commandArgs);
     }
+    if (command === DELETE_ENCOUNTER) {
+      validatedArgs = validateDeleteEncounterCommand(commandArgs);
+    }
 
-    return [command, ...validatedArgs];
+    return { command, commandArgs: validatedArgs };
   }
 
   const helpRowTemplate = _.template(
@@ -204,7 +248,7 @@ const RandomEncounter = (function () {
     const {
       ADD_ENCOUNTER,
       DELETE_ENCOUNTER,
-      SET_ENCOUNTER,
+      UPDATE_ENCOUNTER,
       DISPLAY_ENCOUNTERS,
       ROLL_ENCOUNTER,
     } = COMMANDS;
@@ -223,8 +267,8 @@ const RandomEncounter = (function () {
     });
 
     const setEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${SET_ENCOUNTER}">Set Encounter</a>`,
-      descriptionCell: `<div><code>!encounter ${SET_ENCOUNTER}</code></div><br/><div></div>`,
+      commandCell: `<a href="!encounter ${UPDATE_ENCOUNTER}">Update Encounter</a>`,
+      descriptionCell: `<div><code>!encounter ${UPDATE_ENCOUNTER}</code></div><br/><div></div>`,
     });
 
     const displayEncounterCells = helpRowTemplate({
@@ -284,16 +328,24 @@ const RandomEncounter = (function () {
         ? encountersArray.slice(0, encountersArray.length - 1)
         : encountersArray;
 
-    const encountersObjects = _.map(arrayToConvert, (encounter) =>
-      encountersObjectFactory(encounter, uses, createUniqueId(stateEncounters))
-    );
+    const encountersObjects = [];
+    _.each(arrayToConvert, (encounter) => {
+      encountersObjects.push(
+        encountersObjectFactory(
+          encounter,
+          uses,
+          createUniqueId([...encountersObjects, ...stateEncounters])
+        )
+      );
+    });
 
     return encountersObjects;
   }
 
   function addEncounter(categoryName, encountersToAdd) {
-    const categoryCopy =
-      state[RANDOMENCOUNTER_BASE_NAME].encounters[categoryName];
+    const categoryCopy = JSON.parse(
+      JSON.stringify(state[RANDOMENCOUNTER_BASE_NAME].encounters[categoryName])
+    );
     const encounterObjects = createEncounterObjects(encountersToAdd);
     const initialUses = encounterObjects[0].uses;
 
@@ -308,9 +360,71 @@ const RandomEncounter = (function () {
       }:<div><ul>${_.map(
         encounterObjects,
         (encounter) => `<li>${encounter.description}</li>`
-      )}</ul></div></div>`,
+      ).join('')}</ul></div></div>`,
       'gm',
       'success'
+    );
+  }
+
+  function createDeletionMessage(
+    categoriesToDelete,
+    encountersToDelete,
+    invalidItems
+  ) {
+    const createDeletionList = (deletionArray) =>
+      `<ul>${_.map(deletionArray, (item) => `<li>${item}</li>`).join('')}</ul>`;
+
+    const categoryMessageBlock = categoriesToDelete.length
+      ? `The following categories have been deleted:${createDeletionList(
+          categoriesToDelete
+        )}`
+      : '';
+    const encounterMessageBlock = encountersToDelete.length
+      ? `The following encounter IDs have been deleted:${createDeletionList(
+          encountersToDelete
+        )}`
+      : '';
+    const invalidMessageBlock = invalidItems.length
+      ? `The following items were not found and could not be deleted:${createDeletionList(
+          invalidItems
+        )}`
+      : '';
+
+    return `<div>${categoryMessageBlock}${encounterMessageBlock}${invalidMessageBlock}</div>`;
+  }
+
+  function deleteEncounter(
+    categoriesToDelete,
+    encountersToDelete,
+    invalidItems
+  ) {
+    const encountersCopy = JSON.parse(
+      JSON.stringify(state[RANDOMENCOUNTER_BASE_NAME].encounters)
+    );
+
+    const afterCategoryDelete = _.omit(encountersCopy, (_value, key) =>
+      categoriesToDelete.includes(key)
+    );
+
+    const afterEncounterDelete = {};
+    for (const category in afterCategoryDelete) {
+      afterEncounterDelete[category] = _.filter(
+        afterCategoryDelete[category],
+        (encounter) => !encountersToDelete.includes(encounter.id)
+      );
+    }
+    state[RANDOMENCOUNTER_BASE_NAME].encounters = afterEncounterDelete;
+
+    const deletionMessage = createDeletionMessage(
+      categoriesToDelete,
+      encountersToDelete,
+      invalidItems
+    );
+
+    sendMessage(
+      deletionMessage,
+      'gm',
+      invalidItems.length ? 'warning' : 'success'
     );
   }
 
@@ -319,27 +433,34 @@ const RandomEncounter = (function () {
       const {
         ADD_ENCOUNTER,
         DELETE_ENCOUNTER,
-        SET_ENCOUNTER,
+        UPDATE_ENCOUNTER,
         DISPLAY_ENCOUNTERS,
         ROLL_ENCOUNTER,
       } = COMMANDS;
 
-      const [command, ...commandArgs] = validateCommands(message);
+      const { command, commandArgs } = validateCommands(message);
 
       switch (command) {
         case ADD_ENCOUNTER:
-          const [categoryName, ...encounters] = commandArgs;
+          const { category, encounters } = commandArgs;
 
           if (encounters.length) {
-            addEncounter(categoryName, encounters);
+            addEncounter(category, encounters);
           } else {
-            addCategory(categoryName);
+            addCategory(category);
           }
-
           break;
         case DELETE_ENCOUNTER:
+          const { categoriesToDelete, encountersToDelete, nonexistantItems } =
+            commandArgs;
+
+          deleteEncounter(
+            categoriesToDelete,
+            encountersToDelete,
+            nonexistantItems
+          );
           break;
-        case SET_ENCOUNTER:
+        case UPDATE_ENCOUNTER:
           break;
         case DISPLAY_ENCOUNTERS:
           break;
@@ -358,8 +479,6 @@ const RandomEncounter = (function () {
     on('chat:message', (message) => {
       if (message.type === 'api' && /^!encounter/i.test(message.content)) {
         handleChatInput(message);
-        // DELETE
-        log(state[RANDOMENCOUNTER_BASE_NAME]);
       }
     });
   }
