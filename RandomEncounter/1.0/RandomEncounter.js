@@ -3,7 +3,7 @@ delete state.RandomEncounter;
  * RandomEncounter
  *
  * Version 1.0
- * Last updated: June 10, 2023
+ * Last updated: June 18, 2023
  * Author: thatblindgeye
  * GitHub: https://github.com/thatblindgeye
  */
@@ -12,7 +12,7 @@ const RandomEncounter = (function () {
   'use strict';
 
   const VERSION = '1.0';
-  const LAST_UPDATED = 1687013941553;
+  const LAST_UPDATED = 1687094359734;
   const RANDOMENCOUNTER_BASE_NAME = 'RandomEncounter';
   const RANDOMENCOUNTER_DISPLAY_NAME = `${RANDOMENCOUNTER_BASE_NAME} v${VERSION}`;
   const COMMANDS = {
@@ -61,7 +61,7 @@ const RandomEncounter = (function () {
           description:
             'A random encounter was rolled with [[2d4 + 4]] creatures!',
           uses: undefined,
-          id: '00000000',
+          id: 'c2xije6i',
         },
       ],
     },
@@ -160,7 +160,10 @@ const RandomEncounter = (function () {
     }
 
     const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
-    const encounterIDs = _.pluck(Object.values(stateEncounters).flat(), 'id');
+    const encounterIDs = _.pluck(
+      _.flatten(Object.values(stateEncounters)),
+      'id'
+    );
     const nonexistantItems = _.filter(
       argsWithoutEmptyStrings,
       (arg) => !_.has(stateEncounters, arg) && !_.contains(encounterIDs, arg)
@@ -190,6 +193,53 @@ const RandomEncounter = (function () {
       encountersToDelete,
       nonexistantItems,
     };
+  }
+
+  function validateUpdateEncounterCommand(commandArgs) {
+    const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
+    const encounterCategories = Object.keys(stateEncounters);
+    const encounterIDs = _.pluck(
+      _.flatten(Object.values(stateEncounters)),
+      'id'
+    );
+    const [toUpdate, newValue] = commandArgs;
+
+    if (!toUpdate || !newValue) {
+      throw new Error(
+        `${!toUpdate ? 'The item to update' : 'The new value'} for the <code>${
+          COMMANDS.UPDATE_ENCOUNTER
+        }</code> command cannot be blank.`
+      );
+    }
+
+    if (
+      !_.contains(encounterCategories, toUpdate) &&
+      !_.contains(encounterIDs, toUpdate)
+    ) {
+      throw new Error(
+        `<code>${toUpdate}</code> does not exist as a category name or encounter ID.`
+      );
+    }
+
+    if (
+      _.contains(encounterCategories, newValue) &&
+      !_.contains(encounterIDs, newValue)
+    ) {
+      throw new Error(
+        `<code>${newValue}</code> already exists as a category name. Category names must be unique.`
+      );
+    }
+
+    if (
+      _.contains(encounterIDs, toUpdate) &&
+      !/^(\d+|undefined)$/.test(newValue)
+    ) {
+      throw new Error(
+        `<code>${newValue}</code> is not a valid value for encounter uses. You can only pass in an integer or the string <code>undefined</code> for an encounter's amount of uses.`
+      );
+    }
+
+    return { toUpdate, newValue };
   }
 
   function validateCommands(message) {
@@ -229,14 +279,15 @@ const RandomEncounter = (function () {
       return command;
     }
 
-    let validatedArgs;
-    if (command === ADD_ENCOUNTER) {
-      validatedArgs = validateAddEncounterCommand(commandArgs);
-    }
-    if (command === DELETE_ENCOUNTER) {
-      validatedArgs = validateDeleteEncounterCommand(commandArgs);
-    }
+    const validators = {
+      [ADD_ENCOUNTER]: validateAddEncounterCommand,
+      [DELETE_ENCOUNTER]: validateDeleteEncounterCommand,
+      [UPDATE_ENCOUNTER]: validateUpdateEncounterCommand,
+    };
 
+    const validatedArgs = validators[command]
+      ? validators[command](commandArgs)
+      : undefined;
     return { command, commandArgs: validatedArgs };
   }
 
@@ -316,9 +367,9 @@ const RandomEncounter = (function () {
   }
 
   function createEncounterObjects(encountersArray) {
-    const stateEncounters = Object.values(
-      state[RANDOMENCOUNTER_BASE_NAME].encounters
-    ).flat();
+    const stateEncounters = _.flatten(
+      Object.values(state[RANDOMENCOUNTER_BASE_NAME].encounters)
+    );
     const lastEncounterItem = encountersArray[encountersArray.length - 1];
     const uses = /^\s*\d+\s*$/.test(lastEncounterItem)
       ? parseInt(lastEncounterItem)
@@ -428,6 +479,51 @@ const RandomEncounter = (function () {
     );
   }
 
+  function updateEncounter(toUpdate, newValue) {
+    const encountersCopy = JSON.parse(
+      JSON.stringify(state[RANDOMENCOUNTER_BASE_NAME].encounters)
+    );
+    let message = '';
+
+    if (_.has(encountersCopy, toUpdate)) {
+      Object.assign(encountersCopy, { [newValue]: encountersCopy[toUpdate] });
+      delete encountersCopy[toUpdate];
+
+      state[RANDOMENCOUNTER_BASE_NAME].encounters = encountersCopy;
+      message = `Category <code>${toUpdate}</code> has been renamed to <code>${newValue}</code>`;
+    }
+
+    const encounterIDs = _.pluck(
+      _.flatten(Object.values(encountersCopy)),
+      'id'
+    );
+    if (_.contains(encounterIDs, toUpdate)) {
+      state[RANDOMENCOUNTER_BASE_NAME].encounters = _.mapObject(
+        encountersCopy,
+        (value, key, obj) => {
+          const containsId = obj[key].find(
+            (encounter) => encounter.id === toUpdate
+          );
+
+          if (containsId) {
+            return _.map(obj[key], (encounter) => ({
+              ...encounter,
+              uses: newValue === 'undefined' ? undefined : parseInt(newValue),
+            }));
+          }
+
+          return value;
+        }
+      );
+
+      message = `Encounter with ID <code>${toUpdate}</code> has been updated to have ${
+        newValue === 'undefined' ? 'unlimited uses' : `${newValue} uses`
+      }.`;
+    }
+
+    sendMessage(message, 'gm', 'success');
+  }
+
   function handleChatInput(message) {
     try {
       const {
@@ -461,6 +557,9 @@ const RandomEncounter = (function () {
           );
           break;
         case UPDATE_ENCOUNTER:
+          const { toUpdate, newValue } = commandArgs;
+
+          updateEncounter(toUpdate, newValue);
           break;
         case DISPLAY_ENCOUNTERS:
           break;
