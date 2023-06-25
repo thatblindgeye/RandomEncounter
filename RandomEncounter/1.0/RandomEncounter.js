@@ -15,6 +15,20 @@ const RandomEncounter = (function () {
   const LAST_UPDATED = 1687698220288;
   const RANDOMENCOUNTER_BASE_NAME = 'RandomEncounter';
   const RANDOMENCOUNTER_DISPLAY_NAME = `${RANDOMENCOUNTER_BASE_NAME} v${VERSION}`;
+
+  const DEFAULT_STATE = {
+    encounters: {
+      Default: [
+        {
+          description:
+            'A random encounter was rolled with [[2d4 + 4]] creatures!',
+          uses: undefined,
+          id: 'c2xije6i',
+        },
+      ],
+    },
+    version: VERSION,
+  };
   const COMMANDS = {
     ADD_ENCOUNTER: 'add',
     DELETE_ENCOUNTER: 'delete',
@@ -31,70 +45,130 @@ const RandomEncounter = (function () {
   };
 
   const PREFIX = '!encounter';
+  function macroFactory(macroKey, macroName, createActionCallback) {
+    return {
+      [macroKey]: {
+        name: macroName,
+        createAction: createActionCallback,
+      },
+    };
+  }
   const MACROS = {
-    ADD_ENCOUNTER_MACRO: {
-      name: 'RandomEncounter-add',
-      action: `${PREFIX} ${COMMANDS.ADD_ENCOUNTER}`,
-    },
-    DELETE_ENCOUNTER_MACRO: {
-      name: 'RandomEncounter-delete',
-      action: `${PREFIX} ${COMMANDS.DELETE_ENCOUNTER} ?{Encounter ID to delete}`,
-    },
-    UPDATE_ENCOUNTER_MACRO: {
-      name: 'RandomEncounter-set',
-      action: `${PREFIX} ${COMMANDS.UPDATE_ENCOUNTER}`,
-    },
-    DISPLAY_ENCOUNTERS_MACRO: {
-      name: 'RandomEncounter-display',
-      action: `${PREFIX} ${COMMANDS.DISPLAY_ENCOUNTERS}`,
-    },
-    ROLL_ENCOUNTER_MACRO: {
-      name: 'RandomEncounter-roll',
-      action: `${PREFIX} ${COMMANDS.ROLL_ENCOUNTER}`,
-    },
+    ...macroFactory(
+      'ADD_CATEGORY_MACRO',
+      'RandomEncounter-add-category',
+      () => `${PREFIX} ${COMMANDS.ADD_ENCOUNTER}|?{New category name}`
+    ),
+    ...macroFactory(
+      'ADD_ENCOUNTER_MACRO',
+      'RandomEncounter-add-encounter',
+      () =>
+        `${PREFIX} ${
+          COMMANDS.ADD_ENCOUNTER
+        }?{Category to add to|${createCategoriesQuery(
+          false
+        )}}|?{Encounter(s) to add}`
+    ),
+    ...macroFactory(
+      'DELETE_ENCOUNTER_MACRO',
+      'RandomEncounter-delete',
+      () =>
+        `${PREFIX} ${COMMANDS.DELETE_ENCOUNTER} ?{Categories and/or encounter ID's to delete}`
+    ),
+    ...macroFactory(
+      'UPDATE_ENCOUNTER_MACRO',
+      'RandomEncounter-update',
+      () =>
+        `${PREFIX} ${COMMANDS.UPDATE_ENCOUNTER}|?{Category or encounter ID to update}`
+    ),
+    ...macroFactory(
+      'DISPLAY_ENCOUNTERS_MACRO',
+      'RandomEncounter-display',
+      () =>
+        `${PREFIX} ${
+          COMMANDS.DISPLAY_ENCOUNTERS
+        }?{Categories to display|${createCategoriesQuery()}}`
+    ),
+    ...macroFactory(
+      'ROLL_ENCOUNTER_MACRO',
+      'RandomEncounter-roll',
+      () =>
+        `${PREFIX} ${
+          COMMANDS.ROLL_ENCOUNTER
+        }?{Categories to roll|${createCategoriesQuery()}}`
+    ),
   };
 
-  const DEFAULT_STATE = {
-    encounters: {
-      'Default Category': [
-        {
-          description:
-            'A random encounter was rolled with [[2d4 + 4]] creatures!',
-          uses: 2,
-          id: 'c2xije6i',
-        },
-      ],
-    },
-    version: VERSION,
-  };
+  function createCategoriesQuery(includeAllOption = true) {
+    const encountersState = _.has(state, RANDOMENCOUNTER_BASE_NAME)
+      ? state[RANDOMENCOUNTER_BASE_NAME].encounters
+      : DEFAULT_STATE.encounters;
+    const categoryNames = Object.keys(encountersState);
 
-  function createMacros() {
-    const gmPlayers = _.pluck(
-      _.filter(
-        findObjs({
-          _type: 'player',
-        }),
-        (player) => playerIsGM(player.get('_id'))
-      ),
-      'id'
+    if (categoryNames.length === 1) {
+      return categoryNames[0];
+    }
+
+    return `${includeAllOption ? 'ALL CATEGORIES,&#160;|' : ''}${_.map(
+      categoryNames,
+      (category) => `${category},&#124;${category}`
+    ).join('|')}`;
+  }
+
+  function getGMPlayers() {
+    const playerObjects = findObjs({
+      _type: 'player',
+    });
+    const gmObjects = _.filter(playerObjects, (player) =>
+      playerIsGM(player.get('_id'))
     );
 
+    return _.pluck(gmObjects, 'id');
+  }
+
+  function getMacroByName(macroName) {
+    return findObjs(
+      { _type: 'macro', name: macroName },
+      { caseInsensitive: true }
+    );
+  }
+
+  function createMacros() {
+    const gmPlayers = getGMPlayers();
+
     _.each(MACROS, (macro) => {
-      const { name, action } = macro;
-      const existingMacro = findObjs(
-        { _type: 'macro', name },
-        { caseInsensitive: true }
-      );
+      const { name, createAction } = macro;
+      const existingMacro = getMacroByName(name);
 
       if (!existingMacro.length) {
         createObj('macro', {
           _playerid: gmPlayers[0],
           name: name,
-          action: action,
+          action: createAction(),
           visibleto: gmPlayers.join(','),
         });
       }
     });
+  }
+
+  function updateMacros() {
+    const {
+      ADD_ENCOUNTER_MACRO,
+      DISPLAY_ENCOUNTERS_MACRO,
+      ROLL_ENCOUNTER_MACRO,
+    } = MACROS;
+
+    _.each(
+      [ADD_ENCOUNTER_MACRO, DISPLAY_ENCOUNTERS_MACRO, ROLL_ENCOUNTER_MACRO],
+      (macro) => {
+        const { name, createAction } = macro;
+        const existingMacro = getMacroByName(name);
+
+        if (existingMacro.length) {
+          existingMacro[0].set({ action: createAction() });
+        }
+      }
+    );
   }
 
   function sendMessage(message, toPlayer, status, noarchive = true) {
@@ -549,6 +623,7 @@ const RandomEncounter = (function () {
 
       state[RANDOMENCOUNTER_BASE_NAME].encounters = encountersCopy;
       message = `Category <code>${toUpdate}</code> has been renamed to <code>${newValue}</code>`;
+      updateMacros();
     }
 
     const encounterIDs = _.pluck(
@@ -668,6 +743,7 @@ const RandomEncounter = (function () {
             addEncounter(category, encounters);
           } else {
             addCategory(category);
+            updateMacros();
           }
           break;
         case DELETE_ENCOUNTER:
@@ -679,6 +755,10 @@ const RandomEncounter = (function () {
             encountersToDelete,
             nonexistantItems
           );
+
+          if (categoriesToDelete.length) {
+            updateMacros();
+          }
           break;
         case UPDATE_ENCOUNTER:
           const { toUpdate, newValue } = commandArgs;
@@ -714,7 +794,7 @@ const RandomEncounter = (function () {
   }
 
   function checkInstall() {
-    if (!_.has(state, 'RandomEncounter')) {
+    if (!_.has(state, RANDOMENCOUNTER_BASE_NAME)) {
       log('Installing ' + RANDOMENCOUNTER_DISPLAY_NAME);
       state[RANDOMENCOUNTER_BASE_NAME] = JSON.parse(
         JSON.stringify(DEFAULT_STATE)
