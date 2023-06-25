@@ -3,7 +3,7 @@ delete state.RandomEncounter;
  * RandomEncounter
  *
  * Version 1.0
- * Last updated: June 18, 2023
+ * Last updated: June 25, 2023
  * Author: thatblindgeye
  * GitHub: https://github.com/thatblindgeye
  */
@@ -12,7 +12,7 @@ const RandomEncounter = (function () {
   'use strict';
 
   const VERSION = '1.0';
-  const LAST_UPDATED = 1687094359734;
+  const LAST_UPDATED = 1687698220288;
   const RANDOMENCOUNTER_BASE_NAME = 'RandomEncounter';
   const RANDOMENCOUNTER_DISPLAY_NAME = `${RANDOMENCOUNTER_BASE_NAME} v${VERSION}`;
   const COMMANDS = {
@@ -242,6 +242,42 @@ const RandomEncounter = (function () {
     return { toUpdate, newValue };
   }
 
+  function validateDisplayEncounterCommand(commandArgs) {
+    const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
+    const encounterCategories = Object.keys(stateEncounters);
+
+    if (!commandArgs || !commandArgs.length) {
+      return { categoryNames: null };
+    }
+
+    const categoryNames = _.filter(commandArgs, (arg) => arg !== '');
+    if (!categoryNames.length) {
+      throw new Error(
+        'No valid category names passed in. Category names cannot be blank.'
+      );
+    }
+
+    const invalidCategories = _.filter(
+      categoryNames,
+      (categoryName) => !_.contains(encounterCategories, categoryName)
+    );
+
+    if (invalidCategories.length) {
+      throw new Error(
+        `<div><div>The following categories could not be found:</div><ul>${_.map(
+          invalidCategories,
+          (invalidCategory) => `<li>${invalidCategory}</li>`
+        ).join(
+          ''
+        )}</ul><div>Check that all of the categories passed to the <code>${
+          COMMANDS.DISPLAY_ENCOUNTERS
+        }</code> command are correct and exist.</div></div>`
+      );
+    }
+
+    return { categoryNames };
+  }
+
   function validateCommands(message) {
     const {
       ADD_ENCOUNTER,
@@ -283,6 +319,7 @@ const RandomEncounter = (function () {
       [ADD_ENCOUNTER]: validateAddEncounterCommand,
       [DELETE_ENCOUNTER]: validateDeleteEncounterCommand,
       [UPDATE_ENCOUNTER]: validateUpdateEncounterCommand,
+      [DISPLAY_ENCOUNTERS]: validateDisplayEncounterCommand,
     };
 
     const validatedArgs = validators[command]
@@ -524,6 +561,36 @@ const RandomEncounter = (function () {
     sendMessage(message, 'gm', 'success');
   }
 
+  function createCategoryDisplay(categoryName, encounters) {
+    const encountersMarkup = encounters.length
+      ? _.map(encounters, (encounter) => {
+          const { description, id, uses } = encounter;
+
+          return `<div><div style="line-height: 1.75;">${description}</div><div style="margin-top: 15px;"><div><span style="font-weight: bold;">Remaining Uses:</span> ${
+            uses !== undefined ? uses : 'unlimited'
+          }</div><div style="margin-top: 5px;"><a href="!encounter delete|${id}">Delete</a></div></div></div>`;
+        })
+      : '<div>No encounters to display.</div>';
+
+    return `<div style="border: 1px solid gray; padding: 6px 4px;"><h2>${categoryName}</h2><div style="padding: 8px;">${
+      encounters.length ? encountersMarkup.join('<hr/>') : encountersMarkup
+    }</div></div>`;
+  }
+
+  function displayEncounter(categoryNames) {
+    const categoriesToDisplay = categoryNames
+      ? _.pick(state[RANDOMENCOUNTER_BASE_NAME].encounters, ...categoryNames)
+      : state[RANDOMENCOUNTER_BASE_NAME].encounters;
+
+    const displayMarkup = _.map(
+      categoriesToDisplay,
+      (encounters, categoryName) =>
+        createCategoryDisplay(categoryName, encounters)
+    );
+
+    sendMessage(displayMarkup.join(''), 'gm');
+  }
+
   function handleChatInput(message) {
     try {
       const {
@@ -562,6 +629,8 @@ const RandomEncounter = (function () {
           updateEncounter(toUpdate, newValue);
           break;
         case DISPLAY_ENCOUNTERS:
+          const { categoryNames } = commandArgs;
+          displayEncounter(categoryNames);
           break;
         case ROLL_ENCOUNTER:
           break;
