@@ -60,7 +60,7 @@ const RandomEncounter = (function () {
         {
           description:
             'A random encounter was rolled with [[2d4 + 4]] creatures!',
-          uses: undefined,
+          uses: 2,
           id: 'c2xije6i',
         },
       ],
@@ -242,12 +242,13 @@ const RandomEncounter = (function () {
     return { toUpdate, newValue };
   }
 
-  function validateDisplayEncounterCommand(commandArgs) {
-    const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
-    const encounterCategories = Object.keys(stateEncounters);
+  function validateCategoryNamesArg(commandArgs) {
+    const stateCopy = JSON.parse(
+      JSON.stringify(state[RANDOMENCOUNTER_BASE_NAME].encounters)
+    );
 
     if (!commandArgs || !commandArgs.length) {
-      return { categoryNames: null };
+      return { categories: stateCopy };
     }
 
     const categoryNames = _.filter(commandArgs, (arg) => arg !== '');
@@ -257,9 +258,10 @@ const RandomEncounter = (function () {
       );
     }
 
+    const categoryKeys = Object.keys(stateCopy);
     const invalidCategories = _.filter(
       categoryNames,
-      (categoryName) => !_.contains(encounterCategories, categoryName)
+      (categoryName) => !_.contains(categoryKeys, categoryName)
     );
 
     if (invalidCategories.length) {
@@ -269,13 +271,31 @@ const RandomEncounter = (function () {
           (invalidCategory) => `<li>${invalidCategory}</li>`
         ).join(
           ''
-        )}</ul><div>Check that all of the categories passed to the <code>${
-          COMMANDS.DISPLAY_ENCOUNTERS
-        }</code> command are correct and exist.</div></div>`
+        )}</ul><div>Check that all of the categories are correct and exist.</div></div>`
       );
     }
 
-    return { categoryNames };
+    return { categories: _.pick(stateCopy, ...categoryNames) };
+  }
+
+  function validateRollEncounterCommand(commandArgs) {
+    const initialValidation = validateCategoryNamesArg(commandArgs);
+    const rollableEncounters = _.flatten(
+      Object.values(initialValidation.categories)
+    );
+
+    if (
+      _.every(
+        rollableEncounters,
+        (encounter) => encounter.uses !== undefined && encounter.uses === 0
+      )
+    ) {
+      throw new Error(
+        `Unable to roll an encounter as there are no valid encounters with unlimited uses or greater than 0 remaining uses.`
+      );
+    }
+
+    return initialValidation;
   }
 
   function validateCommands(message) {
@@ -319,7 +339,8 @@ const RandomEncounter = (function () {
       [ADD_ENCOUNTER]: validateAddEncounterCommand,
       [DELETE_ENCOUNTER]: validateDeleteEncounterCommand,
       [UPDATE_ENCOUNTER]: validateUpdateEncounterCommand,
-      [DISPLAY_ENCOUNTERS]: validateDisplayEncounterCommand,
+      [DISPLAY_ENCOUNTERS]: validateCategoryNamesArg,
+      [ROLL_ENCOUNTER]: validateRollEncounterCommand,
     };
 
     const validatedArgs = validators[command]
@@ -577,18 +598,54 @@ const RandomEncounter = (function () {
     }</div></div>`;
   }
 
-  function displayEncounter(categoryNames) {
-    const categoriesToDisplay = categoryNames
-      ? _.pick(state[RANDOMENCOUNTER_BASE_NAME].encounters, ...categoryNames)
-      : state[RANDOMENCOUNTER_BASE_NAME].encounters;
-
+  function displayEncounter(categoriesToDisplay) {
     const displayMarkup = _.map(
       categoriesToDisplay,
       (encounters, categoryName) =>
         createCategoryDisplay(categoryName, encounters)
     );
 
-    sendMessage(displayMarkup.join(''), 'gm');
+    sendMessage(
+      displayMarkup.join('<div style="margin: 20px 0;"></div>'),
+      'gm'
+    );
+  }
+
+  function updateRolledEncounterUses(rolledEncounter) {
+    const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
+    const categoryRolledFrom = _.findKey(stateEncounters, (encounters) =>
+      _.findWhere(encounters, { id: rolledEncounter.id })
+    );
+
+    stateEncounters[categoryRolledFrom] = _.map(
+      stateEncounters[categoryRolledFrom],
+      (encounter) => {
+        if (encounter.id === rolledEncounter.id) {
+          return { ...encounter, uses: encounter.uses - 1 };
+        }
+
+        return encounter;
+      }
+    );
+  }
+
+  function rollEncounter(categoriesToRoll) {
+    const rollableEncounters = _.filter(
+      _.flatten(Object.values(categoriesToRoll)),
+      (encounter) => encounter.uses === undefined || encounter.uses > 0
+    );
+    const rolledEncounter =
+      rollableEncounters[_.random(rollableEncounters.length - 1)];
+
+    if (rolledEncounter.uses !== undefined) {
+      updateRolledEncounterUses(rolledEncounter);
+    }
+
+    sendMessage(
+      `<div style="line-height: 1.75;">${rolledEncounter.description}</div>`,
+      'gm',
+      'generic'
+    );
   }
 
   function handleChatInput(message) {
@@ -629,10 +686,15 @@ const RandomEncounter = (function () {
           updateEncounter(toUpdate, newValue);
           break;
         case DISPLAY_ENCOUNTERS:
-          const { categoryNames } = commandArgs;
-          displayEncounter(categoryNames);
-          break;
         case ROLL_ENCOUNTER:
+          const { categories } = commandArgs;
+
+          if (command === DISPLAY_ENCOUNTERS) {
+            displayEncounter(categories);
+          } else {
+            rollEncounter(categories);
+          }
+
           break;
         default:
           sendMessage(buildHelpDisplay(), 'gm');
