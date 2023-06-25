@@ -366,31 +366,31 @@ const RandomEncounter = (function () {
       "<thead><tr><th style='padding: 2px;'>Command</th><th style='padding: 2px 2px 2px 10px;'>Description</th></tr></thead>";
 
     const addEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${ADD_ENCOUNTER}|">Add Encounter</a>`,
-      descriptionCell: `<div><code>!encounter ${ADD_ENCOUNTER}|</code></div><br/><div></div>`,
+      commandCell: `<a href="!encounter ${ADD_ENCOUNTER}|">Add</a>`,
+      descriptionCell: `<div><code>!encounter ${ADD_ENCOUNTER}|[category name]|[vertical pipe separated list of encounters]|[optional number of uses]</code></div><br/><div>Adds a new category when only the <code>category name</code> is passed in, otherwise adds new encounters to the specified category. You must first create a new category before attempting to add encounters to it.<br/><br/><strong>Note:</strong> You cannot use vertical pipes (<code>|</code>) in category names or encounter decriptions.<br/><br/>The <code>number of uses</code> determines how many times an encounter can be rolled. If this argument is omitted then the specified encounters will be able to be rolled an unlimited number of times.<br/><br/>You can add basic styling to your encounter descriptions when they're rolled:<ul><li><code>&#42;Text&#42;</code> will italicize "*Text*"</li><li><code>&#42;&#42;Text&#42;&#42;</code> will bold "**Text**"</li><li>Wrapping a dice roll in double square brackets (<code>&#91;&#91; &#93;&#93;</code>) will calculate the roll, e.g. <code>&#91;&#91;2d6 + 5&#93;&#93;</code></li></ul><br/><br/>Examples:<br/><ul><li><code>!encounter add|Mountains</code> will add a new category named "Mountains"</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks</code> would add 2 new encounters to the "Mountain" category, both with an unlimited amount of uses</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks|5</code> would add 2 new encounters to the "Mountain" category, both with 5 uses</li></ul></div>`,
     });
 
     const deleteEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${DELETE_ENCOUNTER}|">Delete Encounter</a>`,
-      descriptionCell: `<div><code>!encounter ${DELETE_ENCOUNTER}|</code></div><br/><div></div>`,
+      commandCell: `<a href="!encounter ${DELETE_ENCOUNTER}|">Delete</a>`,
+      descriptionCell: `<div><code>!encounter ${DELETE_ENCOUNTER}|[vertical pipe separated list of categories or encounter IDs]</code></div><br/><div>Deletes the specified categories and/or encounter IDs (case sensitive). For example, <code>!encounter delete|Mountains|ljbkzt9e</code> would delete the entire "Mountains" category as well as the encounter whose id is "ljbkzt9e".</div>`,
     });
 
-    const setEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${UPDATE_ENCOUNTER}">Update Encounter</a>`,
-      descriptionCell: `<div><code>!encounter ${UPDATE_ENCOUNTER}</code></div><br/><div></div>`,
+    const updateEncounterCells = helpRowTemplate({
+      commandCell: `<a href="!encounter ${UPDATE_ENCOUNTER}">Update</a>`,
+      descriptionCell: `<div><code>!encounter ${UPDATE_ENCOUNTER}|[category name or encounter ID]|[new value]</code></div><br/><div>Updates the category name or encounter uses to the <code>new value</code>. The <code>category name</code> or <code>encounter ID</code> are case sensitive. When updating an encounter, you can only pass in an integer.<br/><br/>Examples:<br/><ul><li><code>!encounter update|Mountains|Northern Mountains</code> would update the category "Mountains" to "Northern Mountains"</li><li><code>!encounter update|ljbkzt9e|5</code> would update the amount of uses for the encounter whose id is "ljbkzt9e" to 5 uses.</li></ul></div>`,
     });
 
     const displayEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${DISPLAY_ENCOUNTERS}">Display Encounters</a>`,
-      descriptionCell: `<div><code>!encounter ${DISPLAY_ENCOUNTERS}</code></div><br/><div></div>`,
+      commandCell: `<a href="!encounter ${DISPLAY_ENCOUNTERS}">Display</a>`,
+      descriptionCell: `<div><code>!encounter ${DISPLAY_ENCOUNTERS}|[optional vertical pipe separated list of categories]</code></div><br/><div>Displays all of the encounters for the specified categories (case sensitive), or encounters for all categories if none are provided.<br/><br/>Examples:<br/><ul><li><code>!encounter display|Mountains</code> will display all encounters for the "Mountains" category</li><li><code>!encounter display|Mountains|Swamp</code> will display all encounters for the "Mountains" and "Swamp" categories</li></ul></div>`,
     });
 
     const rollEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${ROLL_ENCOUNTER}|">Roll Encounter</a>`,
-      descriptionCell: `<div><code>!encounter ${ROLL_ENCOUNTER}|</code></div><br/><div></div>`,
+      commandCell: `<a href="!encounter ${ROLL_ENCOUNTER}|">Roll</a>`,
+      descriptionCell: `<div><code>!encounter ${ROLL_ENCOUNTER}|[optional vertical pipe separated list of categories]</code></div><br/><div>Rolls for a single encounter from the specified category names (case sensitive). If not category names are passed in, an encounter will be rolled from all available categories.<br/><br/>Examples:<br/><ul><li><code>!encounter roll|Mountains</code> will roll an encounter only from the "Mountains" category</li><li><code>!encounter roll|Mountains|Day</code> will roll an encounter from the "Mountains" or "Day" categories</li></ul></div>`,
     });
 
-    return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${setEncounterCells}${displayEncounterCells}${rollEncounterCells}</tbody></table>`;
+    return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${updateEncounterCells}${displayEncounterCells}${rollEncounterCells}</tbody></table>`;
   }
 
   let now = Date.now();
