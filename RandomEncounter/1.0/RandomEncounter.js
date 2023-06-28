@@ -30,11 +30,13 @@ const RandomEncounter = (function () {
     version: VERSION,
   };
   const COMMANDS = {
-    ADD_ENCOUNTER: 'add',
-    DELETE_ENCOUNTER: 'delete',
-    UPDATE_ENCOUNTER: 'update',
-    DISPLAY_ENCOUNTERS: 'display',
-    ROLL_ENCOUNTER: 'roll',
+    ADD: 'add',
+    DELETE: 'delete',
+    UPDATE: 'update',
+    DISPLAY: 'display',
+    ROLL: 'roll',
+    IMPORT: 'import',
+    EXPORT: 'export',
   };
 
   const STATUS_STYLING = {
@@ -57,15 +59,13 @@ const RandomEncounter = (function () {
     ...macroFactory(
       'ADD_CATEGORY_MACRO',
       'RandomEncounter-add-category',
-      () => `${PREFIX} ${COMMANDS.ADD_ENCOUNTER}|?{New category name}`
+      () => `${PREFIX} ${COMMANDS.ADD}|?{New category name}`
     ),
     ...macroFactory(
       'ADD_ENCOUNTER_MACRO',
       'RandomEncounter-add-encounter',
       () =>
-        `${PREFIX} ${
-          COMMANDS.ADD_ENCOUNTER
-        }?{Category to add to|${createCategoriesQuery(
+        `${PREFIX} ${COMMANDS.ADD}?{Category to add to|${createCategoriesQuery(
           false
         )}}|?{Encounter(s) to add}`
     ),
@@ -73,20 +73,19 @@ const RandomEncounter = (function () {
       'DELETE_ENCOUNTER_MACRO',
       'RandomEncounter-delete',
       () =>
-        `${PREFIX} ${COMMANDS.DELETE_ENCOUNTER} ?{Categories and/or encounter ID's to delete}`
+        `${PREFIX} ${COMMANDS.DELETE} ?{Categories and/or encounter ID's to delete}`
     ),
     ...macroFactory(
       'UPDATE_ENCOUNTER_MACRO',
       'RandomEncounter-update',
-      () =>
-        `${PREFIX} ${COMMANDS.UPDATE_ENCOUNTER}|?{Category or encounter ID to update}`
+      () => `${PREFIX} ${COMMANDS.UPDATE}|?{Category or encounter ID to update}`
     ),
     ...macroFactory(
       'DISPLAY_ENCOUNTERS_MACRO',
       'RandomEncounter-display',
       () =>
         `${PREFIX} ${
-          COMMANDS.DISPLAY_ENCOUNTERS
+          COMMANDS.DISPLAY
         }?{Categories to display|${createCategoriesQuery()}}`
     ),
     ...macroFactory(
@@ -94,7 +93,7 @@ const RandomEncounter = (function () {
       'RandomEncounter-roll',
       () =>
         `${PREFIX} ${
-          COMMANDS.ROLL_ENCOUNTER
+          COMMANDS.ROLL
         }?{Categories to roll|${createCategoriesQuery()}}`
     ),
   };
@@ -184,7 +183,7 @@ const RandomEncounter = (function () {
     sendChat(RANDOMENCOUNTER_DISPLAY_NAME, messageBlock, null, { noarchive });
   }
 
-  function validateAddEncounterCommand(commandArgs) {
+  function validateAddCommand(commandArgs) {
     const hasInvalidCategoryArg = !commandArgs[0];
     if (hasInvalidCategoryArg) {
       throw new Error(
@@ -225,7 +224,7 @@ const RandomEncounter = (function () {
     return { category: categoryName, encounters: encounterArgs };
   }
 
-  function validateDeleteEncounterCommand(commandArgs) {
+  function validateDeleteCommand(commandArgs) {
     const argsWithoutEmptyStrings = _.filter(commandArgs, (arg) => arg !== '');
     if (!argsWithoutEmptyStrings.length) {
       throw new Error(
@@ -269,7 +268,7 @@ const RandomEncounter = (function () {
     };
   }
 
-  function validateUpdateEncounterCommand(commandArgs) {
+  function validateUpdateCommand(commandArgs) {
     const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
     const encounterCategories = Object.keys(stateEncounters);
     const encounterIDs = _.pluck(
@@ -281,7 +280,7 @@ const RandomEncounter = (function () {
     if (!toUpdate || !newValue) {
       throw new Error(
         `${!toUpdate ? 'The item to update' : 'The new value'} for the <code>${
-          COMMANDS.UPDATE_ENCOUNTER
+          COMMANDS.UPDATE
         }</code> command cannot be blank.`
       );
     }
@@ -352,7 +351,7 @@ const RandomEncounter = (function () {
     return { categories: _.pick(stateCopy, ...categoryNames) };
   }
 
-  function validateRollEncounterCommand(commandArgs) {
+  function validateRollCommand(commandArgs) {
     const initialValidation = validateCategoryNamesArg(commandArgs);
     const rollableEncounters = _.flatten(
       Object.values(initialValidation.categories)
@@ -372,14 +371,82 @@ const RandomEncounter = (function () {
     return initialValidation;
   }
 
+  function validateImportCommand(commandArgs) {
+    if (!commandArgs || !commandArgs.length) {
+      throw new Error(
+        `Failed to import. You must pass in JSON as a parameter, e.g. <code>'{"Category Name": [{"description": "Some text"}]}'</code>.`
+      );
+    }
+
+    const parsedImport = JSON.parse(commandArgs[0]);
+    const checkIsObject = (toCheck) =>
+      _.isObject(toCheck) && !_.isArray(toCheck) && !_.isFunction(toCheck);
+    const importIsObject = checkIsObject(parsedImport);
+    if (!importIsObject) {
+      throw new Error(
+        `Failed to import. The content passed in must be an object.`
+      );
+    }
+
+    const importValues = _.values(parsedImport);
+    if (_.some(importValues, (importValue) => !_.isArray(importValue))) {
+      throw new Error(
+        'Failed to import. Each category object must have an array as a value.'
+      );
+    }
+
+    const flattenedImportedValues = _.flatten(importValues);
+    if (
+      _.some(
+        flattenedImportedValues,
+        (importValue) => !checkIsObject(importValue)
+      )
+    ) {
+      throw new Error(
+        'Failed to import. Each encounters array within a category must contain only objects.'
+      );
+    }
+
+    if (
+      _.some(
+        flattenedImportedValues,
+        (importValue) => !_.has(importValue, 'description')
+      )
+    ) {
+      throw new Error(
+        'Failed to import. Each encounter object within an encounters array must have a <code>description</code> property.'
+      );
+    }
+
+    if (
+      _.some(
+        flattenedImportedValues,
+        (importValue) =>
+          _.has(importValue, 'uses') && _.isNaN(parseInt(importValue.uses))
+      )
+    ) {
+      throw new Error(
+        'Failed to import. When passing in a <code>uses</code> property to an encounter object, it must be an integer.'
+      );
+    }
+
+    const encountersWithIds = _.filter(
+      flattenedImportedValues,
+      (importedValue) => _.has(importedValue, 'id')
+    );
+    const allEncounterIds = _.pluck(encountersWithIds, 'id');
+    const uniqueencounterIds = _.uniq(allEncounterIds);
+    if (uniqueencounterIds.length < allEncounterIds.length) {
+      throw new Error(
+        'Failed to import. When passing in an <code>id</code> property to an encounter object, it must be unique across all encounter objects.'
+      );
+    }
+
+    return { importedEncounters: parsedImport };
+  }
+
   function validateCommands(message) {
-    const {
-      ADD_ENCOUNTER,
-      DELETE_ENCOUNTER,
-      UPDATE_ENCOUNTER,
-      DISPLAY_ENCOUNTERS,
-      ROLL_ENCOUNTER,
-    } = COMMANDS;
+    const { ADD, DELETE, UPDATE, DISPLAY, ROLL, IMPORT } = COMMANDS;
 
     const commandContent = message.content.replace(/!encounter\s*/, '');
     const [command, ...commandArgs] = _.map(
@@ -397,8 +464,7 @@ const RandomEncounter = (function () {
     }
 
     const commandCalledWithoutParameters =
-      [ADD_ENCOUNTER, DELETE_ENCOUNTER, UPDATE_ENCOUNTER].includes(command) &&
-      !commandArgs.length;
+      [ADD, DELETE, UPDATE].includes(command) && !commandArgs.length;
     if (commandCalledWithoutParameters) {
       throw new Error(
         `At least 1 parameter must be passed in when calling the <code>${command}</code> command. Send <code>!encounter</code> in chat to check the expected syntax of each command.`
@@ -410,11 +476,12 @@ const RandomEncounter = (function () {
     }
 
     const validators = {
-      [ADD_ENCOUNTER]: validateAddEncounterCommand,
-      [DELETE_ENCOUNTER]: validateDeleteEncounterCommand,
-      [UPDATE_ENCOUNTER]: validateUpdateEncounterCommand,
-      [DISPLAY_ENCOUNTERS]: validateCategoryNamesArg,
-      [ROLL_ENCOUNTER]: validateRollEncounterCommand,
+      [ADD]: validateAddCommand,
+      [DELETE]: validateDeleteCommand,
+      [UPDATE]: validateUpdateCommand,
+      [DISPLAY]: validateCategoryNamesArg,
+      [ROLL]: validateRollCommand,
+      [IMPORT]: validateImportCommand,
     };
 
     const validatedArgs = validators[command]
@@ -428,43 +495,47 @@ const RandomEncounter = (function () {
   );
 
   function buildHelpDisplay() {
-    const {
-      ADD_ENCOUNTER,
-      DELETE_ENCOUNTER,
-      UPDATE_ENCOUNTER,
-      DISPLAY_ENCOUNTERS,
-      ROLL_ENCOUNTER,
-    } = COMMANDS;
+    const { ADD, DELETE, UPDATE, DISPLAY, ROLL, IMPORT, EXPORT } = COMMANDS;
 
     const tableHeader =
       "<thead><tr><th style='padding: 2px;'>Command</th><th style='padding: 2px 2px 2px 10px;'>Description</th></tr></thead>";
 
     const addEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${ADD_ENCOUNTER}|">Add</a>`,
-      descriptionCell: `<div><code>!encounter ${ADD_ENCOUNTER}|[category name]|[vertical pipe separated list of encounters]|[optional number of uses]</code></div><br/><div>Adds a new category when only the <code>category name</code> is passed in, otherwise adds new encounters to the specified category. You must first create a new category before attempting to add encounters to it.<br/><br/><strong>Note:</strong> You cannot use vertical pipes (<code>|</code>) in category names or encounter decriptions.<br/><br/>The <code>number of uses</code> determines how many times an encounter can be rolled. If this argument is omitted then the specified encounters will be able to be rolled an unlimited number of times.<br/><br/>You can add basic styling to your encounter descriptions when they're rolled:<ul><li><code>&#42;Text&#42;</code> will italicize "*Text*"</li><li><code>&#42;&#42;Text&#42;&#42;</code> will bold "**Text**"</li><li>Wrapping a dice roll in double square brackets (<code>&#91;&#91; &#93;&#93;</code>) will calculate the roll, e.g. <code>&#91;&#91;2d6 + 5&#93;&#93;</code></li></ul><br/><br/>Examples:<br/><ul><li><code>!encounter add|Mountains</code> will add a new category named "Mountains"</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks</code> would add 2 new encounters to the "Mountain" category, both with an unlimited amount of uses</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks|5</code> would add 2 new encounters to the "Mountain" category, both with 5 uses</li></ul></div>`,
+      commandCell: `<a href="!encounter ${ADD}|">Add</a>`,
+      descriptionCell: `<div><code>!encounter ${ADD}|[category name]|[vertical pipe separated list of encounters]|[optional number of uses]</code></div><br/><div>Adds a new category when only the <code>category name</code> is passed in, otherwise adds new encounters to the specified category. You must first create a new category before attempting to add encounters to it.<br/><br/><strong>Note:</strong> You cannot use vertical pipes (<code>|</code>) in category names or encounter decriptions.<br/><br/>The <code>number of uses</code> determines how many times an encounter can be rolled. If this argument is omitted then the specified encounters will be able to be rolled an unlimited number of times.<br/><br/>You can add basic styling to your encounter descriptions when they're rolled:<ul><li><code>&#42;Text&#42;</code> will italicize "*Text*"</li><li><code>&#42;&#42;Text&#42;&#42;</code> will bold "**Text**"</li><li>Wrapping a dice roll in double square brackets (<code>&#91;&#91; &#93;&#93;</code>) will calculate the roll, e.g. <code>&#91;&#91;2d6 + 5&#93;&#93;</code></li></ul><br/><br/>Examples:<br/><ul><li><code>!encounter add|Mountains</code> will add a new category named "Mountains"</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks</code> would add 2 new encounters to the "Mountain" category, both with an unlimited amount of uses</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks|5</code> would add 2 new encounters to the "Mountain" category, both with 5 uses</li></ul></div>`,
     });
 
     const deleteEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${DELETE_ENCOUNTER}|">Delete</a>`,
-      descriptionCell: `<div><code>!encounter ${DELETE_ENCOUNTER}|[vertical pipe separated list of categories or encounter IDs]</code></div><br/><div>Deletes the specified categories and/or encounter IDs (case sensitive). For example, <code>!encounter delete|Mountains|ljbkzt9e</code> would delete the entire "Mountains" category as well as the encounter whose id is "ljbkzt9e".</div>`,
+      commandCell: `<a href="!encounter ${DELETE}|">Delete</a>`,
+      descriptionCell: `<div><code>!encounter ${DELETE}|[vertical pipe separated list of categories or encounter IDs]</code></div><br/><div>Deletes the specified categories and/or encounter IDs (case sensitive). For example, <code>!encounter delete|Mountains|ljbkzt9e</code> would delete the entire "Mountains" category as well as the encounter whose id is "ljbkzt9e".</div>`,
     });
 
     const updateEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${UPDATE_ENCOUNTER}">Update</a>`,
-      descriptionCell: `<div><code>!encounter ${UPDATE_ENCOUNTER}|[category name or encounter ID]|[new value]</code></div><br/><div>Updates the category name or encounter uses to the <code>new value</code>. The <code>category name</code> or <code>encounter ID</code> are case sensitive. When updating an encounter, you can only pass in an integer.<br/><br/>Examples:<br/><ul><li><code>!encounter update|Mountains|Northern Mountains</code> would update the category "Mountains" to "Northern Mountains"</li><li><code>!encounter update|ljbkzt9e|5</code> would update the amount of uses for the encounter whose id is "ljbkzt9e" to 5 uses.</li></ul></div>`,
+      commandCell: `<a href="!encounter ${UPDATE}">Update</a>`,
+      descriptionCell: `<div><code>!encounter ${UPDATE}|[category name or encounter ID]|[new value]</code></div><br/><div>Updates the category name or encounter uses to the <code>new value</code>. The <code>category name</code> or <code>encounter ID</code> are case sensitive. When updating an encounter, you can only pass in an integer.<br/><br/>Examples:<br/><ul><li><code>!encounter update|Mountains|Northern Mountains</code> would update the category "Mountains" to "Northern Mountains"</li><li><code>!encounter update|ljbkzt9e|5</code> would update the amount of uses for the encounter whose id is "ljbkzt9e" to 5 uses.</li></ul></div>`,
     });
 
     const displayEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${DISPLAY_ENCOUNTERS}">Display</a>`,
-      descriptionCell: `<div><code>!encounter ${DISPLAY_ENCOUNTERS}|[optional vertical pipe separated list of categories]</code></div><br/><div>Displays all of the encounters for the specified categories (case sensitive), or encounters for all categories if none are provided.<br/><br/>Examples:<br/><ul><li><code>!encounter display|Mountains</code> will display all encounters for the "Mountains" category</li><li><code>!encounter display|Mountains|Swamp</code> will display all encounters for the "Mountains" and "Swamp" categories</li></ul></div>`,
+      commandCell: `<a href="!encounter ${DISPLAY}">Display</a>`,
+      descriptionCell: `<div><code>!encounter ${DISPLAY}|[optional vertical pipe separated list of categories]</code></div><br/><div>Displays all of the encounters for the specified categories (case sensitive), or encounters for all categories if none are provided.<br/><br/>Examples:<br/><ul><li><code>!encounter display|Mountains</code> will display all encounters for the "Mountains" category</li><li><code>!encounter display|Mountains|Swamp</code> will display all encounters for the "Mountains" and "Swamp" categories</li></ul></div>`,
     });
 
     const rollEncounterCells = helpRowTemplate({
-      commandCell: `<a href="!encounter ${ROLL_ENCOUNTER}|">Roll</a>`,
-      descriptionCell: `<div><code>!encounter ${ROLL_ENCOUNTER}|[optional vertical pipe separated list of categories]</code></div><br/><div>Rolls for a single encounter from the specified category names (case sensitive). If not category names are passed in, an encounter will be rolled from all available categories.<br/><br/>Examples:<br/><ul><li><code>!encounter roll|Mountains</code> will roll an encounter only from the "Mountains" category</li><li><code>!encounter roll|Mountains|Day</code> will roll an encounter from the "Mountains" or "Day" categories</li></ul></div>`,
+      commandCell: `<a href="!encounter ${ROLL}|">Roll</a>`,
+      descriptionCell: `<div><code>!encounter ${ROLL}|[optional vertical pipe separated list of categories]</code></div><br/><div>Rolls for a single encounter from the specified category names (case sensitive). If no category names are passed in, an encounter will be rolled from all available categories.<br/><br/>Examples:<br/><ul><li><code>!encounter roll|Mountains</code> will roll an encounter only from the "Mountains" category</li><li><code>!encounter roll|Mountains|Day</code> will roll an encounter from the "Mountains" or "Day" categories</li></ul></div>`,
     });
 
-    return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${updateEncounterCells}${displayEncounterCells}${rollEncounterCells}</tbody></table>`;
+    const exportCells = helpRowTemplate({
+      commandCell: `<a href="!encounter ${EXPORT}|">Export</a>`,
+      descriptionCell: `<div><code>!encounter ${EXPORT}</code></div><br/><div>Exports the current encounters state as JSON.</div>`,
+    });
+
+    const importCells = helpRowTemplate({
+      commandCell: `<a href="!encounter ${IMPORT}|">Import</a>`,
+      descriptionCell: `<div><code>!encounter ${IMPORT}|[new encounters state as JSON]</code></div><br/><div>Sets the encounters state to the imported JSON. <span style="font-weight: bold;">This will overwrite the current encounters state and cannot be undone.</span><br/><br/>The JSON must follow the format:<br/><ul><li>An object <code>{}</code> with category names as properties</li><li>Each category name has an array <code>[]</code> as a value</li><li>Each category name array is comprised of encounter objects</li><li>Each encounter object must have a <code>description</code> property</li><li>An encounter object can have optional <code>uses</code> and <code>id</code> properties. <code>id</code> values must be unique across all encounter objects, not just encounter objects in the current category.</li></ul><br/<br/>Examples:<br/><ul><li><code>!encounter import|{ "Category 1": [ { "description": "Sample text" } ] }</code></li><li><code>!encounter import|{ "Category 1": [ { "description": "Sample text", "uses": 5, "id": 12345 } ], "Category 2": [ { "description": "Sample text", "id": 67890 } ] }</code></li></ul></div>`,
+    });
+
+    return `<table style="border: 2px solid gray;">${tableHeader}<tbody>${addEncounterCells}${deleteEncounterCells}${updateEncounterCells}${displayEncounterCells}${rollEncounterCells}${exportCells}${importCells}</tbody></table>`;
   }
 
   let now = Date.now();
@@ -723,20 +794,40 @@ const RandomEncounter = (function () {
     );
   }
 
+  function importEncounters(importedJSON) {
+    const importedState = {};
+    for (const category in importedJSON) {
+      importedState[category] = [];
+      _.each(importedJSON[category], (importedEncounter) => {
+        if (!importedEncounter.id) {
+          importedState[category].push({
+            ...importedEncounter,
+            id: createUniqueId(_.flatten(Object.values(importedState))),
+          });
+        }
+
+        if (importedEncounter.id) {
+          importedState[category].push(importedEncounter);
+        }
+      });
+    }
+
+    state[RANDOMENCOUNTER_BASE_NAME].encounters = importedState;
+    sendMessage(
+      `Imported new ${RANDOMENCOUNTER_BASE_NAME} state successfully.`,
+      'gm',
+      'success'
+    );
+  }
+
   function handleChatInput(message) {
     try {
-      const {
-        ADD_ENCOUNTER,
-        DELETE_ENCOUNTER,
-        UPDATE_ENCOUNTER,
-        DISPLAY_ENCOUNTERS,
-        ROLL_ENCOUNTER,
-      } = COMMANDS;
+      const { ADD, DELETE, UPDATE, DISPLAY, ROLL, IMPORT, EXPORT } = COMMANDS;
 
       const { command, commandArgs } = validateCommands(message);
 
       switch (command) {
-        case ADD_ENCOUNTER:
+        case ADD:
           const { category, encounters } = commandArgs;
 
           if (encounters.length) {
@@ -746,7 +837,7 @@ const RandomEncounter = (function () {
             updateMacros();
           }
           break;
-        case DELETE_ENCOUNTER:
+        case DELETE:
           const { categoriesToDelete, encountersToDelete, nonexistantItems } =
             commandArgs;
 
@@ -760,21 +851,32 @@ const RandomEncounter = (function () {
             updateMacros();
           }
           break;
-        case UPDATE_ENCOUNTER:
+        case UPDATE:
           const { toUpdate, newValue } = commandArgs;
 
           updateEncounter(toUpdate, newValue);
           break;
-        case DISPLAY_ENCOUNTERS:
-        case ROLL_ENCOUNTER:
+        case DISPLAY:
+        case ROLL:
           const { categories } = commandArgs;
+          const commandFunction = {
+            [DISPLAY]: displayEncounter,
+            [ROLL]: rollEncounter,
+          };
 
-          if (command === DISPLAY_ENCOUNTERS) {
-            displayEncounter(categories);
-          } else {
-            rollEncounter(categories);
-          }
+          commandFunction[command](categories);
 
+          break;
+        case IMPORT:
+          const { importedEncounters } = commandArgs;
+          importEncounters(importedEncounters);
+          break;
+        case EXPORT:
+          sendMessage(
+            `<code>'${JSON.stringify(
+              state[RANDOMENCOUNTER_BASE_NAME].encounters
+            )}'</code>`
+          );
           break;
         default:
           sendMessage(buildHelpDisplay(), 'gm');
