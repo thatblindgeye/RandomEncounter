@@ -186,9 +186,7 @@ const RandomEncounter = (function () {
   function validateAddCommand(commandArgs) {
     const hasInvalidCategoryArg = !commandArgs[0];
     if (hasInvalidCategoryArg) {
-      throw new Error(
-        `Invalid category name. Category names must be at least 1 character long and cannot be blank.`
-      );
+      throw new Error(`Category names cannot be blank.`);
     }
 
     const [categoryName, ...encounterArgs] = _.filter(
@@ -199,25 +197,25 @@ const RandomEncounter = (function () {
     const invalidEncounterArgs =
       commandArgs.length > 1 && !encounterArgs.length;
     if (invalidEncounterArgs) {
-      throw new Error(
-        `No valid encounters to add. Each encounter must be at least 1 character long and cannot be blank.`
-      );
+      throw new Error(`Encounters cannot be blank.`);
     }
 
     const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
+    const stateKeys = Object.keys(stateEncounters);
+
     const existingCategory =
-      _.has(stateEncounters, categoryName) && !encounterArgs.length;
+      _.contains(stateKeys, categoryName) && !encounterArgs.length;
     if (existingCategory) {
       throw new Error(
-        `Category <code>${commandArgs[0]}</code> already exists. Category names must be unique when adding a new category.`
+        `Category <code>${categoryName}</code> already exists. Category names must be unique.`
       );
     }
 
     const nonexistantCategory =
-      !_.has(stateEncounters, categoryName) && encounterArgs.length;
+      !_.contains(stateKeys, categoryName) && encounterArgs.length;
     if (nonexistantCategory) {
       throw new Error(
-        `The encounter category <code>${commandArgs[0]}</code> does not exist. Check that the category is correct, including lettercase and spacing, or add a new category before attempting to add encounters to it.`
+        `Category <code>${categoryName}</code> does not exist. Check that the category is correct, including lettercase and spacing, or add a new category before attempting to add encounters to it.`
       );
     }
 
@@ -270,7 +268,7 @@ const RandomEncounter = (function () {
 
   function validateUpdateCommand(commandArgs) {
     const stateEncounters = state[RANDOMENCOUNTER_BASE_NAME].encounters;
-    const encounterCategories = Object.keys(stateEncounters);
+    const stateKeys = Object.keys(stateEncounters);
     const encounterIDs = _.pluck(
       _.flatten(Object.values(stateEncounters)),
       'id'
@@ -279,14 +277,12 @@ const RandomEncounter = (function () {
 
     if (!toUpdate || !newValue) {
       throw new Error(
-        `${!toUpdate ? 'The item to update' : 'The new value'} for the <code>${
-          COMMANDS.UPDATE
-        }</code> command cannot be blank.`
+        `${!toUpdate ? 'The item to update' : 'The new value'} cannot be blank.`
       );
     }
 
     if (
-      !_.contains(encounterCategories, toUpdate) &&
+      !_.contains(stateKeys, toUpdate) &&
       !_.contains(encounterIDs, toUpdate)
     ) {
       throw new Error(
@@ -294,10 +290,7 @@ const RandomEncounter = (function () {
       );
     }
 
-    if (
-      _.contains(encounterCategories, newValue) &&
-      !_.contains(encounterIDs, newValue)
-    ) {
+    if (_.contains(stateKeys, newValue)) {
       throw new Error(
         `<code>${newValue}</code> already exists as a category name. Category names must be unique.`
       );
@@ -331,10 +324,9 @@ const RandomEncounter = (function () {
       );
     }
 
-    const categoryKeys = Object.keys(stateCopy);
     const invalidCategories = _.filter(
       categoryNames,
-      (categoryName) => !_.contains(categoryKeys, categoryName)
+      (categoryName) => !_.contains(Object.keys(stateCopy), categoryName)
     );
 
     if (invalidCategories.length) {
@@ -348,7 +340,9 @@ const RandomEncounter = (function () {
       );
     }
 
-    return { categories: _.pick(stateCopy, ...categoryNames) };
+    return {
+      categories: _.pick(stateCopy, ...categoryNames),
+    };
   }
 
   function validateRollCommand(commandArgs) {
@@ -502,7 +496,7 @@ const RandomEncounter = (function () {
 
     const addEncounterCells = helpRowTemplate({
       commandCell: `<a href="!encounter ${ADD}|">Add</a>`,
-      descriptionCell: `<div><code>!encounter ${ADD}|[category name]|[vertical pipe separated list of encounters]|[optional number of uses]</code></div><br/><div>Adds a new category when only the <code>category name</code> is passed in, otherwise adds new encounters to the specified category. You must first create a new category before attempting to add encounters to it.<br/><br/><strong>Note:</strong> You cannot use vertical pipes (<code>|</code>) in category names or encounter decriptions.<br/><br/>The <code>number of uses</code> determines how many times an encounter can be rolled. If this argument is omitted then the specified encounters will be able to be rolled an unlimited number of times.<br/><br/>You can add basic styling to your encounter descriptions when they're rolled:<ul><li><code>&#42;Text&#42;</code> will italicize "*Text*"</li><li><code>&#42;&#42;Text&#42;&#42;</code> will bold "**Text**"</li><li>Wrapping a dice roll in double square brackets (<code>&#91;&#91; &#93;&#93;</code>) will calculate the roll, e.g. <code>&#91;&#91;2d6 + 5&#93;&#93;</code></li></ul><br/><br/>Examples:<br/><ul><li><code>!encounter add|Mountains</code> will add a new category named "Mountains"</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks</code> would add 2 new encounters to the "Mountain" category, both with an unlimited amount of uses</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks|5</code> would add 2 new encounters to the "Mountain" category, both with 5 uses</li></ul></div>`,
+      descriptionCell: `<div><code>!encounter ${ADD}|[category name]|[vertical pipe separated list of encounters]|[optional number of uses]</code></div><br/><div>Adds a new category when only the <code>category name</code> is passed in, otherwise adds new encounters to the specified category. You must first create a new category before attempting to add encounters to it.<br/><br/><strong>Note:</strong> You cannot use vertical pipes (<code>|</code>) in category names or encounter decriptions.<br/><br/>The <code>number of uses</code> determines how many times an encounter can be rolled. If this argument is omitted then the specified encounters will be able to be rolled an unlimited number of times.<br/><br/>You can add basic styling to your encounter descriptions when they're rolled:<ul><li><code>&#42;Text&#42;</code> will italicize "*Text*"</li><li><code>&#42;&#42;Text&#42;&#42;</code> will bold "**Text**"</li><li><code>&#42;&#42;&#42;Text&#42;&#42;&#42;</code> will bold and italicize "***Text***"</li><li>Wrapping a dice roll in double square brackets (<code>&#91;&#91; &#93;&#93;</code>) will calculate the roll, e.g. <code>&#91;&#91;2d6 + 5&#93;&#93;</code></li></ul><br/><br/>Examples:<br/><ul><li><code>!encounter add|Mountains</code> will add a new category named "Mountains"</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks</code> would add 2 new encounters to the "Mountain" category, both with an unlimited amount of uses</li><li><code>!encounter add|Mountains|A rockslide occurs|An earth elemental attacks|5</code> would add 2 new encounters to the "Mountain" category, both with 5 uses</li></ul></div>`,
     });
 
     const deleteEncounterCells = helpRowTemplate({
@@ -735,7 +729,7 @@ const RandomEncounter = (function () {
 
           return `<div><div style="line-height: 1.75;">${description}</div><div style="margin-top: 15px;"><div><span style="font-weight: bold;">Remaining Uses:</span> ${
             uses !== undefined ? uses : 'unlimited'
-          }</div><div style="margin-top: 5px;"><a href="!encounter delete|${id}">Delete</a></div></div></div>`;
+          }</div><div style="margin-top: 5px;"><a href="!encounter delete|${id}">Delete ${id}</a></div></div></div>`;
         })
       : '<div>No encounters to display.</div>';
 
@@ -873,9 +867,9 @@ const RandomEncounter = (function () {
           break;
         case EXPORT:
           sendMessage(
-            `<code>'${JSON.stringify(
+            `<code>${JSON.stringify(
               state[RANDOMENCOUNTER_BASE_NAME].encounters
-            )}'</code>`
+            )}</code>`
           );
           break;
         default:
