@@ -3,7 +3,7 @@ delete state.RandomEncounter;
  * RandomEncounter
  *
  * Version 1.0
- * Last updated: June 25, 2023
+ * Last updated: August 28, 2023
  * Author: thatblindgeye
  * GitHub: https://github.com/thatblindgeye
  */
@@ -12,7 +12,7 @@ const RandomEncounter = (function () {
   'use strict';
 
   const VERSION = '1.0';
-  const LAST_UPDATED = 1687698220288;
+  const LAST_UPDATED = 1693225298215;
   const RANDOMENCOUNTER_BASE_NAME = 'RandomEncounter';
   const RANDOMENCOUNTER_DISPLAY_NAME = `${RANDOMENCOUNTER_BASE_NAME} v${VERSION}`;
 
@@ -180,7 +180,9 @@ const RandomEncounter = (function () {
       messageStyling ? ` style="${messageStyling}"` : ''
     }>${message}</div>`;
 
-    sendChat(RANDOMENCOUNTER_DISPLAY_NAME, messageBlock, null, { noarchive });
+    sendChat(RANDOMENCOUNTER_DISPLAY_NAME, messageBlock, null, {
+      noarchive: true,
+    });
   }
 
   function validateAddCommand(commandArgs) {
@@ -869,7 +871,8 @@ const RandomEncounter = (function () {
           sendMessage(
             `<code>${JSON.stringify(
               state[RANDOMENCOUNTER_BASE_NAME].encounters
-            )}</code>`
+            )}</code>`,
+            'gm'
           );
           break;
         default:
